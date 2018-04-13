@@ -141,12 +141,12 @@ static int usrsock_rpmsg_daemon(int argc, char *argv[])
   struct usrsock_rpmsg_s priv = {};
   int ret;
 
-  if (argv[2] == NULL)
+  if (argv[1] == NULL)
     {
       return -EINVAL;
     }
 
-  priv.cpu_name = argv[2];
+  priv.cpu_name = argv[1];
   priv.pid = getpid();
 
   sem_init(&priv.sem, 0, 0);
@@ -261,9 +261,9 @@ int main(int argc, char *argv[])
 int usrsock_main(int argc, char *argv[])
 #endif
 {
-  return task_create("usrsock",
+  return task_create(argv[0],
                      CONFIG_RPMSG_USRSOCK_PRIORITY,
                      CONFIG_RPMSG_USRSOCK_STACKSIZE,
                      usrsock_rpmsg_daemon,
-                     argv);
+                     argv + 1);
 }
