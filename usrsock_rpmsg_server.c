@@ -93,6 +93,8 @@ static void usrsock_rpmsg_getsockopt_handler(struct rpmsg_channel *channel,
                     void *data, int len, void *priv_, unsigned long src);
 static void usrsock_rpmsg_getsockname_handler(struct rpmsg_channel *channel,
                     void *data, int len, void *priv_, unsigned long src);
+static void usrsock_rpmsg_getpeername_handler(struct rpmsg_channel *channel,
+                    void *data, int len, void *priv_, unsigned long src);
 static void usrsock_rpmsg_bind_handler(struct rpmsg_channel *channel,
                     void *data, int len, void *priv_, unsigned long src);
 static void usrsock_rpmsg_listen_handler(struct rpmsg_channel *channel,
@@ -126,6 +128,7 @@ static const rpmsg_rx_cb_t g_usrsock_rpmsg_handler[] =
   [USRSOCK_REQUEST_SETSOCKOPT]  = usrsock_rpmsg_setsockopt_handler,
   [USRSOCK_REQUEST_GETSOCKOPT]  = usrsock_rpmsg_getsockopt_handler,
   [USRSOCK_REQUEST_GETSOCKNAME] = usrsock_rpmsg_getsockname_handler,
+  [USRSOCK_REQUEST_GETPEERNAME] = usrsock_rpmsg_getpeername_handler,
   [USRSOCK_REQUEST_BIND]        = usrsock_rpmsg_bind_handler,
   [USRSOCK_REQUEST_LISTEN]      = usrsock_rpmsg_listen_handler,
   [USRSOCK_REQUEST_ACCEPT]      = usrsock_rpmsg_accept_handler,
@@ -400,6 +403,28 @@ static void usrsock_rpmsg_getsockname_handler(struct rpmsg_channel *channel,
   if (req->usockid >= 0 && req->usockid < CONFIG_NSOCKET_DESCRIPTORS)
     {
       ret = psock_getsockname(&priv->socks[req->usockid],
+              (struct sockaddr *)(ack + 1), &outaddrlen);
+    }
+
+  usrsock_rpmsg_send_data_ack(channel,
+    ack, req->head.xid, ret, inaddrlen, outaddrlen);
+}
+
+static void usrsock_rpmsg_getpeername_handler(struct rpmsg_channel *channel,
+                    void *data, int len, void *priv_, unsigned long src)
+{
+  struct usrsock_rpmsg_s *priv = rpmsg_get_privdata(channel);
+  struct usrsock_request_getpeername_s *req = data;
+  struct usrsock_message_datareq_ack_s *ack;
+  socklen_t outaddrlen = req->max_addrlen;
+  socklen_t inaddrlen = req->max_addrlen;
+  int ret = -EBADF;
+
+  ack = rpmsg_get_tx_payload_buffer(channel, (uint32_t *)&len, true);
+
+  if (req->usockid >= 0 && req->usockid < CONFIG_NSOCKET_DESCRIPTORS)
+    {
+      ret = psock_getpeername(&priv->socks[req->usockid],
               (struct sockaddr *)(ack + 1), &outaddrlen);
     }
 
