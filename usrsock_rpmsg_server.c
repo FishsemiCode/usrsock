@@ -41,6 +41,7 @@
 #include <nuttx/config.h>
 
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
@@ -212,6 +213,9 @@ static void usrsock_rpmsg_socket_handler(struct rpmsg_channel *channel,
             {
               priv->socks[i].s_crefs++;
               priv->channels[i] = channel;
+
+              psock_fcntl(&priv->socks[i], F_SETFL,
+                psock_fcntl(&priv->socks[i], F_GETFL) | O_NONBLOCK);
 
               if (req->type != SOCK_STREAM && req->type != SOCK_SEQPACKET)
                 {
