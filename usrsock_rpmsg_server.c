@@ -725,9 +725,13 @@ int main(int argc, char *argv[])
 int usrsock_main(int argc, char *argv[])
 #endif
 {
-  return task_create(argv[0],
+  int ret;
+
+  ret = task_create(argv[0],
                      CONFIG_RPMSG_USRSOCK_PRIORITY,
                      CONFIG_RPMSG_USRSOCK_STACKSIZE,
                      usrsock_rpmsg_daemon,
                      argv + 1);
+
+  return ret > 0 ? 0 : ret;
 }
