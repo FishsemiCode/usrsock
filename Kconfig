@@ -14,7 +14,7 @@ if RPMSG_USRSOCK
 
 config RPMSG_USRSOCK_PRIORITY
 	int "usrsock task priority"
-	default 230
+	default 80
 	---help---
 		The priority for usrsock task.
 
