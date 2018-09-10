@@ -52,9 +52,6 @@
 
 #include "usrsock_rpmsg.h"
 
-#define USRSOCK_RPMSG_POLL_EVENTS    \
-            (POLLIN | POLLOUT | POLLERR | POLLHUP | POLLSOCK)
-
 struct usrsock_rpmsg_s
 {
   pid_t                 pid;
@@ -213,17 +210,11 @@ static void usrsock_rpmsg_socket_handler(struct rpmsg_channel *channel,
             {
               priv->socks[i].s_crefs++;
               priv->channels[i] = channel;
+              priv->pfds[i].ptr = &priv->socks[i];
 
               psock_fcntl(&priv->socks[i], F_SETFL,
                 psock_fcntl(&priv->socks[i], F_GETFL) | O_NONBLOCK);
 
-              if (req->type != SOCK_STREAM && req->type != SOCK_SEQPACKET)
-                {
-                  priv->pfds[i].ptr = &priv->socks[i];
-                  priv->pfds[i].events = USRSOCK_RPMSG_POLL_EVENTS;
-                  /* wakeup the poll thread */
-                  kill(priv->pid, SIGUSR1);
-                }
               ret = i; /* return index as the usockid */
             }
           break;
@@ -232,6 +223,11 @@ static void usrsock_rpmsg_socket_handler(struct rpmsg_channel *channel,
 
   /* Send the ack with lock to ensure the event come after response */
   usrsock_rpmsg_send_ack(channel, req->head.xid, ret);
+  if (ret >= 0)
+    {
+      usrsock_rpmsg_send_event(channel, ret,
+        USRSOCK_EVENT_SENDTO_READY | USRSOCK_EVENT_RECVFROM_AVAIL);
+    }
   pthread_mutex_unlock(&priv->mutex);
 }
 
@@ -276,15 +272,6 @@ static void usrsock_rpmsg_connect_handler(struct rpmsg_channel *channel,
     }
 
   usrsock_rpmsg_send_ack(channel, req->head.xid, ret);
-
-  if (ret >= 0 && priv->pfds[req->usockid].ptr == NULL)
-    {
-      pthread_mutex_lock(&priv->mutex);
-      priv->pfds[req->usockid].ptr = &priv->socks[req->usockid];
-      priv->pfds[req->usockid].events = USRSOCK_RPMSG_POLL_EVENTS;
-      kill(priv->pid, SIGUSR1); /* Wakeup the poll thread */
-      pthread_mutex_unlock(&priv->mutex);
-    }
 }
 
 static void usrsock_rpmsg_sendto_handler(struct rpmsg_channel *channel,
@@ -465,15 +452,6 @@ static void usrsock_rpmsg_listen_handler(struct rpmsg_channel *channel,
     }
 
   usrsock_rpmsg_send_ack(channel, req->head.xid, ret);
-
-  if (ret >= 0)
-    {
-      pthread_mutex_lock(&priv->mutex);
-      priv->pfds[req->usockid].ptr = &priv->socks[req->usockid];
-      priv->pfds[req->usockid].events = USRSOCK_RPMSG_POLL_EVENTS;
-      kill(priv->pid, SIGUSR1); /* Wakeup the poll thread */
-      pthread_mutex_unlock(&priv->mutex);
-    }
 }
 
 static void usrsock_rpmsg_accept_handler(struct rpmsg_channel *channel,
@@ -505,12 +483,7 @@ static void usrsock_rpmsg_accept_handler(struct rpmsg_channel *channel,
             {
               priv->socks[i].s_crefs++;
               priv->channels[i] = channel;
-
               priv->pfds[i].ptr = &priv->socks[i];
-              priv->pfds[i].events = USRSOCK_RPMSG_POLL_EVENTS;
-
-              /* wakeup the poll thread */
-              kill(priv->pid, SIGUSR1);
 
               /* Append index as usockid to the payload */
               if (outaddrlen <= inaddrlen)
@@ -530,7 +503,11 @@ static void usrsock_rpmsg_accept_handler(struct rpmsg_channel *channel,
   /* Send the ack with lock to ensure the event come after response */
   usrsock_rpmsg_send_data_ack(channel,
     ack, req->head.xid, ret, inaddrlen, outaddrlen);
-
+  if (ret >= 0)
+    {
+      usrsock_rpmsg_send_event(channel, i,
+        USRSOCK_EVENT_SENDTO_READY | USRSOCK_EVENT_RECVFROM_AVAIL);
+    }
   pthread_mutex_unlock(&priv->mutex);
 }
 
@@ -617,7 +594,8 @@ static int usrsock_rpmsg_prepare_poll(struct usrsock_rpmsg_s *priv,
     {
       if (priv->pfds[i].ptr)
         {
-          pfds[count++] = priv->pfds[i];
+          pfds[count] = priv->pfds[i];
+          pfds[count++].events |= POLLERR | POLLHUP | POLLSOCK;
         }
     }
   pthread_mutex_unlock(&priv->mutex);
