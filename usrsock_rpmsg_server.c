@@ -200,35 +200,39 @@ static void usrsock_rpmsg_socket_handler(struct rpmsg_channel *channel,
   struct usrsock_request_socket_s *req = data;
   int i, ret = -ENFILE;
 
-  pthread_mutex_lock(&priv->mutex);
   for (i = 0; i < CONFIG_NSOCKET_DESCRIPTORS; i++)
     {
+      pthread_mutex_lock(&priv->mutex);
       if (priv->socks[i].s_crefs == 0)
         {
+          priv->socks[i].s_crefs++;
+          pthread_mutex_unlock(&priv->mutex);
+
           ret = psock_socket(req->domain, req->type, req->protocol, &priv->socks[i]);
           if (ret >= 0)
             {
-              priv->socks[i].s_crefs++;
-              priv->channels[i] = channel;
-              priv->pfds[i].ptr = &priv->socks[i];
-
               psock_fcntl(&priv->socks[i], F_SETFL,
                 psock_fcntl(&priv->socks[i], F_GETFL) | O_NONBLOCK);
 
+              priv->channels[i] = channel;
+              priv->pfds[i].ptr = &priv->socks[i];
               ret = i; /* return index as the usockid */
+            }
+          else
+            {
+              priv->socks[i].s_crefs--;
             }
           break;
         }
+      pthread_mutex_unlock(&priv->mutex);
     }
 
-  /* Send the ack with lock to ensure the event come after response */
   usrsock_rpmsg_send_ack(channel, req->head.xid, ret);
   if (ret >= 0)
     {
       usrsock_rpmsg_send_event(channel, ret,
         USRSOCK_EVENT_SENDTO_READY | USRSOCK_EVENT_RECVFROM_AVAIL);
     }
-  pthread_mutex_unlock(&priv->mutex);
 }
 
 static void usrsock_rpmsg_close_handler(struct rpmsg_channel *channel,
@@ -240,11 +244,11 @@ static void usrsock_rpmsg_close_handler(struct rpmsg_channel *channel,
 
   if (req->usockid >= 0 && req->usockid < CONFIG_NSOCKET_DESCRIPTORS)
     {
-      pthread_mutex_lock(&priv->mutex);
-      priv->channels[req->usockid] = NULL;
       priv->pfds[req->usockid].ptr = NULL;
+      priv->channels[req->usockid] = NULL;
 
       /* Signal and wait the poll thread to wakeup */
+      pthread_mutex_lock(&priv->mutex);
       kill(priv->pid, SIGUSR1);
       pthread_cond_wait(&priv->cond, &priv->mutex);
       pthread_mutex_unlock(&priv->mutex);
@@ -266,7 +270,6 @@ static void usrsock_rpmsg_connect_handler(struct rpmsg_channel *channel,
   if (req->usockid >= 0 && req->usockid < CONFIG_NSOCKET_DESCRIPTORS)
     {
       usrsock_rpmsg_send_ack(channel, req->head.xid, -EINPROGRESS);
-
       ret = psock_connect(&priv->socks[req->usockid],
               (const struct sockaddr *)(req + 1), req->addrlen);
     }
@@ -290,8 +293,13 @@ static void usrsock_rpmsg_sendto_handler(struct rpmsg_channel *channel,
     }
 
   usrsock_rpmsg_send_ack(channel, req->head.xid, ret);
-
-  if (ret >= 0 || ret == -EAGAIN)
+  if (ret >= 0)
+    {
+      /* Assume the new buffer can be accepted until return -EAGAIN */
+      usrsock_rpmsg_send_event(channel,
+        req->usockid, USRSOCK_EVENT_SENDTO_READY);
+    }
+  else if (ret == -EAGAIN)
     {
       pthread_mutex_lock(&priv->mutex);
       priv->pfds[req->usockid].events |= POLLOUT;
@@ -332,7 +340,6 @@ static void usrsock_rpmsg_recvfrom_handler(struct rpmsg_channel *channel,
 
   usrsock_rpmsg_send_data_ack(channel,
     ack, req->head.xid, ret, inaddrlen, outaddrlen);
-
   if (ret >= 0 || ret == -EAGAIN)
     {
       pthread_mutex_lock(&priv->mutex);
@@ -368,7 +375,6 @@ static void usrsock_rpmsg_getsockopt_handler(struct rpmsg_channel *channel,
   int ret = -EBADF;
 
   ack = rpmsg_get_tx_payload_buffer(channel, (uint32_t *)&len, true);
-
   if (req->usockid >= 0 && req->usockid < CONFIG_NSOCKET_DESCRIPTORS)
     {
       ret = psock_getsockopt(&priv->socks[req->usockid],
@@ -390,7 +396,6 @@ static void usrsock_rpmsg_getsockname_handler(struct rpmsg_channel *channel,
   int ret = -EBADF;
 
   ack = rpmsg_get_tx_payload_buffer(channel, (uint32_t *)&len, true);
-
   if (req->usockid >= 0 && req->usockid < CONFIG_NSOCKET_DESCRIPTORS)
     {
       ret = psock_getsockname(&priv->socks[req->usockid],
@@ -412,7 +417,6 @@ static void usrsock_rpmsg_getpeername_handler(struct rpmsg_channel *channel,
   int ret = -EBADF;
 
   ack = rpmsg_get_tx_payload_buffer(channel, (uint32_t *)&len, true);
-
   if (req->usockid >= 0 && req->usockid < CONFIG_NSOCKET_DESCRIPTORS)
     {
       ret = psock_getpeername(&priv->socks[req->usockid],
@@ -462,45 +466,49 @@ static void usrsock_rpmsg_accept_handler(struct rpmsg_channel *channel,
   struct usrsock_message_datareq_ack_s *ack;
   socklen_t outaddrlen = req->max_addrlen;
   socklen_t inaddrlen = req->max_addrlen;
-  int i, ret = -ENFILE;
+  int i, ret = -EBADF;
 
   ack = rpmsg_get_tx_payload_buffer(channel, (uint32_t *)&len, true);
-
-  pthread_mutex_lock(&priv->mutex);
-  for (i = 0; i < CONFIG_NSOCKET_DESCRIPTORS; i++)
+  if (req->usockid >= 0 && req->usockid < CONFIG_NSOCKET_DESCRIPTORS)
     {
-      if (req->usockid < 0 || req->usockid >= CONFIG_NSOCKET_DESCRIPTORS)
+      ret = -ENFILE; /* Assume no free socket handler */
+      for (i = 0; i < CONFIG_NSOCKET_DESCRIPTORS; i++)
         {
-          ret = -EBADF;
-          break;
-        }
-      else if (priv->socks[i].s_crefs == 0)
-        {
-          ret = psock_accept(&priv->socks[req->usockid],
-                  outaddrlen ? (struct sockaddr *)(ack + 1) : NULL,
-                  outaddrlen ? &outaddrlen : NULL, &priv->socks[i]);
-          if (ret >= 0)
+          pthread_mutex_lock(&priv->mutex);
+          if (priv->socks[i].s_crefs == 0)
             {
               priv->socks[i].s_crefs++;
-              priv->channels[i] = channel;
-              priv->pfds[i].ptr = &priv->socks[i];
+              pthread_mutex_unlock(&priv->mutex);
 
-              /* Append index as usockid to the payload */
-              if (outaddrlen <= inaddrlen)
+              ret = psock_accept(&priv->socks[req->usockid],
+                      outaddrlen ? (struct sockaddr *)(ack + 1) : NULL,
+                      outaddrlen ? &outaddrlen : NULL, &priv->socks[i]);
+              if (ret >= 0)
                 {
-                  *(int16_t *)((void *)(ack + 1) + outaddrlen) = i;
+                  priv->channels[i] = channel;
+                  priv->pfds[i].ptr = &priv->socks[i];
+
+                  /* Append index as usockid to the payload */
+                  if (outaddrlen <= inaddrlen)
+                    {
+                      *(int16_t *)((void *)(ack + 1) + outaddrlen) = i;
+                    }
+                  else
+                    {
+                      *(int16_t *)((void *)(ack + 1) + inaddrlen) = i;
+                    }
+                  ret = sizeof(int16_t); /* Return usockid size */
                 }
               else
                 {
-                  *(int16_t *)((void *)(ack + 1) + inaddrlen) = i;
+                  priv->socks[i].s_crefs--;
                 }
-              ret = sizeof(int16_t); /* Return usockid size */
+              break;
             }
-          break;
+          pthread_mutex_unlock(&priv->mutex);
         }
     }
 
-  /* Send the ack with lock to ensure the event come after response */
   usrsock_rpmsg_send_data_ack(channel,
     ack, req->head.xid, ret, inaddrlen, outaddrlen);
   if (ret >= 0)
@@ -508,7 +516,6 @@ static void usrsock_rpmsg_accept_handler(struct rpmsg_channel *channel,
       usrsock_rpmsg_send_event(channel, i,
         USRSOCK_EVENT_SENDTO_READY | USRSOCK_EVENT_RECVFROM_AVAIL);
     }
-  pthread_mutex_unlock(&priv->mutex);
 }
 
 static void usrsock_rpmsg_ioctl_handler(struct rpmsg_channel *channel,
@@ -520,7 +527,6 @@ static void usrsock_rpmsg_ioctl_handler(struct rpmsg_channel *channel,
   int ret = -EBADF;
 
   ack = rpmsg_get_tx_payload_buffer(channel, (uint32_t *)&len, true);
-
   if (req->usockid >= 0 && req->usockid < CONFIG_NSOCKET_DESCRIPTORS)
     {
       memcpy(ack + 1, req + 1, req->arglen);
@@ -546,19 +552,19 @@ static void usrsock_rpmsg_channel_destroyed(struct rpmsg_channel *channel)
   struct socket *socks[CONFIG_NSOCKET_DESCRIPTORS];
   int i, count = 0;
 
-  pthread_mutex_lock(&priv->mutex);
   /* Collect all socks belong to the dead client */
   for (i = 0; i < CONFIG_NSOCKET_DESCRIPTORS; i++)
     {
       if (priv->channels[i] == channel)
         {
           socks[count++] = &priv->socks[i];
-          priv->channels[i] = NULL;
           priv->pfds[i].ptr = NULL;
+          priv->channels[i] = NULL;
         }
     }
 
   /* Signal and wait the poll thread to wakeup */
+  pthread_mutex_lock(&priv->mutex);
   kill(priv->pid, SIGUSR1);
   pthread_cond_wait(&priv->cond, &priv->mutex);
   pthread_mutex_unlock(&priv->mutex);
@@ -710,10 +716,10 @@ int usrsock_main(int argc, char *argv[])
   int ret;
 
   ret = task_create(argv[0],
-                     CONFIG_RPMSG_USRSOCK_PRIORITY,
-                     CONFIG_RPMSG_USRSOCK_STACKSIZE,
-                     usrsock_rpmsg_daemon,
-                     argv + 1);
+                    CONFIG_RPMSG_USRSOCK_PRIORITY,
+                    CONFIG_RPMSG_USRSOCK_STACKSIZE,
+                    usrsock_rpmsg_daemon,
+                    argv + 1);
 
   return ret > 0 ? 0 : ret;
 }
