@@ -210,7 +210,7 @@ static int usrsock_rpmsg_daemon(int argc, char *argv[])
           ret = poll(&pfd, 1, -1);
           if (ret < 0)
             {
-              ret == -errno;
+              ret = -errno;
               break;
             }
 
