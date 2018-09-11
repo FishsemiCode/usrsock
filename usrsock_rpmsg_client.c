@@ -99,7 +99,6 @@ static void usrsock_rpmsg_channel_created(struct rpmsg_channel *channel)
 
   if (priv != NULL)
     {
-      rpmsg_set_privdata(channel, priv);
       priv->channel = channel;
       sem_post(&priv->sem);
     }
@@ -172,6 +171,10 @@ static int usrsock_rpmsg_daemon(int argc, char *argv[])
       do
         {
           ret = sem_wait(&priv.sem);
+          if (ret < 0)
+            {
+              ret = -errno;
+            }
         }
       while (ret == -EINTR);
 
@@ -205,8 +208,9 @@ static int usrsock_rpmsg_daemon(int argc, char *argv[])
           pfd.ptr = &priv.file;
           pfd.events = POLLIN | POLLFILE;
           ret = poll(&pfd, 1, -1);
-          if (ret < 0 && errno != EINTR)
+          if (ret < 0)
             {
+              ret == -errno;
               break;
             }
 
@@ -264,10 +268,10 @@ int usrsock_main(int argc, char *argv[])
   int ret;
 
   ret = task_create(argv[0],
-                     CONFIG_RPMSG_USRSOCK_PRIORITY,
-                     CONFIG_RPMSG_USRSOCK_STACKSIZE,
-                     usrsock_rpmsg_daemon,
-                     argv + 1);
+                    CONFIG_RPMSG_USRSOCK_PRIORITY,
+                    CONFIG_RPMSG_USRSOCK_STACKSIZE,
+                    usrsock_rpmsg_daemon,
+                    argv + 1);
 
   return ret > 0 ? 0 : ret;
 }
