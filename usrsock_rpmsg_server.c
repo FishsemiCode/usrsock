@@ -105,7 +105,7 @@ static void usrsock_rpmsg_ioctl_handler(struct rpmsg_channel *channel,
 static void usrsock_rpmsg_channel_created(struct rpmsg_channel *channel);
 static void usrsock_rpmsg_channel_destroyed(struct rpmsg_channel *channel);
 static void usrsock_rpmsg_channel_received(struct rpmsg_channel *channel,
-                    void *data, int len, void *priv_, unsigned long src);
+                    void *data, int len, void *priv, unsigned long src);
 
 static int usrsock_rpmsg_prepare_poll(struct usrsock_rpmsg_s *priv,
                                       struct pollfd* pfds);
@@ -577,13 +577,13 @@ static void usrsock_rpmsg_channel_destroyed(struct rpmsg_channel *channel)
 }
 
 static void usrsock_rpmsg_channel_received(struct rpmsg_channel *channel,
-                    void *data, int len, void *priv_, unsigned long src)
+                    void *data, int len, void *priv, unsigned long src)
 {
   struct usrsock_request_common_s *common = data;
 
   if (common->reqid >= 0 && common->reqid < USRSOCK_REQUEST__MAX)
     {
-      g_usrsock_rpmsg_handler[common->reqid](channel, data, len, priv_, src);
+      g_usrsock_rpmsg_handler[common->reqid](channel, data, len, priv, src);
     }
 }
 

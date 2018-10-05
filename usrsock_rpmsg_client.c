@@ -229,7 +229,7 @@ static int usrsock_rpmsg_daemon(int argc, char *argv[])
             }
 
           /* Send the packet to remote */
-          ret = rpmsg_send_nocopy(priv.channel, buf, len);
+          ret = rpmsg_send_nocopy(priv.channel, buf, ret);
           if (ret < 0)
             {
               break;
