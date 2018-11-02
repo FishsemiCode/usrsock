@@ -694,6 +694,7 @@ static int usrsock_rpmsg_daemon(int argc, char *argv[])
 {
   struct pollfd pfds[CONFIG_NSOCKET_DESCRIPTORS];
   struct usrsock_rpmsg_s *priv;
+  sigset_t sigmask;
   int ret;
 
   priv = calloc(1, sizeof(*priv));
@@ -707,7 +708,10 @@ static int usrsock_rpmsg_daemon(int argc, char *argv[])
   pthread_mutex_init(&priv->mutex, NULL);
   pthread_cond_init(&priv->cond, NULL);
 
-  sigrelse(SIGUSR1);
+  sigprocmask(SIG_SETMASK, NULL, &sigmask);
+  sigaddset(&sigmask, SIGUSR1);
+  sigprocmask(SIG_SETMASK, &sigmask, NULL);
+  sigdelset(&sigmask, SIGUSR1);
 
   ret = rpmsg_register_callback(USRSOCK_RPMSG_CHANNEL_NAME,
                                 priv,
@@ -727,7 +731,7 @@ static int usrsock_rpmsg_daemon(int argc, char *argv[])
       ret = usrsock_rpmsg_prepare_poll(priv, pfds);
 
       /* Monitor the state change from them */
-      if (poll(pfds, ret, -1) > 0)
+      if (ppoll(pfds, ret, NULL, &sigmask) > 0)
         {
           /* Process all changed socks */
           usrsock_rpmsg_process_poll(priv, pfds, ret);
