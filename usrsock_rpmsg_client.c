@@ -184,16 +184,10 @@ static int usrsock_rpmsg_daemon(int argc, char *argv[])
         }
 
       /* Open the kernel channel */
-      ret = open("/dev/usrsock", O_RDWR);
+      ret = file_open(&priv.file, "/dev/usrsock", O_RDWR);
       if (ret < 0)
         {
           ret = -errno;
-          goto delete_channel;
-        }
-
-      ret = file_detach(ret, &priv.file);
-      if (ret < 0)
-        {
           goto delete_channel;
         }
 
@@ -237,7 +231,7 @@ static int usrsock_rpmsg_daemon(int argc, char *argv[])
         }
 
       /* Reclaim the resource */
-      file_close_detached(&priv.file);
+      file_close(&priv.file);
       if (priv.channel)
         {
           goto delete_channel;
