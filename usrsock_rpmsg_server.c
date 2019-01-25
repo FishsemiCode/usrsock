@@ -690,7 +690,15 @@ static void usrsock_rpmsg_process_poll(struct usrsock_rpmsg_s *priv,
     }
 }
 
-static int usrsock_rpmsg_daemon(int argc, char *argv[])
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/
+
+#ifdef BUILD_MODULE
+int main(int argc, char *argv[])
+#else
+int usrsock_main(int argc, char *argv[])
+#endif
 {
   struct pollfd pfds[CONFIG_NSOCKET_DESCRIPTORS];
   struct usrsock_rpmsg_s *priv;
@@ -744,25 +752,4 @@ free_priv:
   pthread_mutex_destroy(&priv->mutex);
   free(priv);
   return ret;
-}
-
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
-
-#ifdef CONFIG_BUILD_KERNEL
-int main(int argc, char *argv[])
-#else
-int usrsock_main(int argc, char *argv[])
-#endif
-{
-  int ret;
-
-  ret = task_create(argv[0],
-                    CONFIG_RPMSG_USRSOCK_PRIORITY,
-                    CONFIG_RPMSG_USRSOCK_STACKSIZE,
-                    usrsock_rpmsg_daemon,
-                    argv + 1);
-
-  return ret > 0 ? 0 : ret;
 }
