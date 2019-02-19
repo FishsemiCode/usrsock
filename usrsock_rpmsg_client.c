@@ -95,12 +95,19 @@ static void usrsock_rpmsg_device_created(struct remote_device *rdev, void *priv_
 
 static void usrsock_rpmsg_channel_created(struct rpmsg_channel *channel)
 {
-  struct usrsock_rpmsg_s *priv = rpmsg_get_privdata(channel);
+  struct usrsock_rpmsg_s *priv;
 
-  if (priv != NULL)
+  while (1)
     {
-      priv->channel = channel;
-      sem_post(&priv->sem);
+      priv = rpmsg_get_privdata(channel);
+      if (priv)
+        {
+          priv->channel = channel;
+          sem_post(&priv->sem);
+          break;
+        }
+
+      usleep(10);
     }
 }
 
