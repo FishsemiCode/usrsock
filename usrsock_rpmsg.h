@@ -46,6 +46,6 @@
  * Pre-processor definitions
  ****************************************************************************/
 
-#define USRSOCK_RPMSG_CHANNEL_NAME   "rpmsg-usrsock"
+#define USRSOCK_RPMSG_EPT_NAME      "rpmsg-usrsock"
 
 #endif /* __USRSOCK_RPMSG_H */

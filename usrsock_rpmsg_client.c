@@ -47,7 +47,7 @@
 #include <signal.h>
 
 #include <nuttx/fs/fs.h>
-#include <openamp/open_amp.h>
+#include <nuttx/rptun/openamp.h>
 
 #include "usrsock_rpmsg.h"
 
@@ -57,8 +57,8 @@
 
 struct usrsock_rpmsg_s
 {
-  struct rpmsg_channel *channel;
-  const char           *cpu_name;
+  struct rpmsg_endpoint ept;
+  const char           *cpuname;
   pid_t                 pid;
   sem_t                 sem;
   struct file           file;
@@ -68,78 +68,66 @@ struct usrsock_rpmsg_s
  * Private Function Prototypes
  ****************************************************************************/
 
-static void usrsock_rpmsg_device_created(struct remote_device *rdev, void *priv_);
-static void usrsock_rpmsg_channel_created(struct rpmsg_channel *channel);
-static void usrsock_rpmsg_channel_destroyed(struct rpmsg_channel *channel);
-static void usrsock_rpmsg_channel_received(struct rpmsg_channel *channel,
-                    void *data, int len, void *priv_, unsigned long src);
+static void usrsock_rpmsg_device_created(struct rpmsg_device *rdev,
+                                         void *priv_);
+static void usrsock_rpmsg_device_destroy(struct rpmsg_device *rdev,
+                                         void *priv_);
+static int usrsock_rpmsg_ept_cb(struct rpmsg_endpoint *ept, void *data,
+                                size_t len, uint32_t src, void *priv_);
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
-static void usrsock_rpmsg_device_created(struct remote_device *rdev, void *priv_)
+static void usrsock_rpmsg_device_created(struct rpmsg_device *rdev,
+                                         void *priv_)
 {
   struct usrsock_rpmsg_s *priv = priv_;
-  struct rpmsg_channel *channel;
+  int ret;
 
-  if (!strcmp(priv->cpu_name, rdev->proc->cpu_name))
+  if (!strcmp(priv->cpuname, rpmsg_get_cpuname(rdev)))
     {
-      channel = rpmsg_create_channel(rdev, USRSOCK_RPMSG_CHANNEL_NAME);
-      if (channel != NULL)
-        {
-          rpmsg_set_privdata(channel, priv);
-        }
-    }
-}
+      priv->ept.priv = priv;
 
-static void usrsock_rpmsg_channel_created(struct rpmsg_channel *channel)
-{
-  struct usrsock_rpmsg_s *priv;
-
-  while (1)
-    {
-      priv = rpmsg_get_privdata(channel);
-      if (priv)
+      ret = rpmsg_create_ept(&priv->ept, rdev, USRSOCK_RPMSG_EPT_NAME,
+                             RPMSG_ADDR_ANY, RPMSG_ADDR_ANY,
+                             usrsock_rpmsg_ept_cb, NULL);
+      if (ret == 0)
         {
-          priv->channel = channel;
           sem_post(&priv->sem);
-          break;
         }
-
-      usleep(10);
     }
 }
 
-static void usrsock_rpmsg_channel_destroyed(struct rpmsg_channel *channel)
+static void usrsock_rpmsg_device_destroy(struct rpmsg_device *rdev,
+                                         void *priv_)
 {
-  struct usrsock_rpmsg_s *priv = rpmsg_get_privdata(channel);
+  struct usrsock_rpmsg_s *priv = priv_;
 
-  if (priv != NULL)
+  if (!strcmp(priv->cpuname, rpmsg_get_cpuname(rdev)))
     {
-      priv->channel = NULL;
+      rpmsg_destroy_ept(&priv->ept);
       kill(priv->pid, SIGUSR1);
     }
 }
 
-static void usrsock_rpmsg_channel_received(struct rpmsg_channel *channel,
-                    void *data, int len, void *priv_, unsigned long src)
+static int usrsock_rpmsg_ept_cb(struct rpmsg_endpoint *ept, void *data,
+                                size_t len, uint32_t src, void *priv_)
 {
-  struct usrsock_rpmsg_s *priv = rpmsg_get_privdata(channel);
+  struct usrsock_rpmsg_s *priv = priv_;
 
-  if (priv)
+  while (len > 0)
     {
-      while (len > 0)
+      ssize_t ret = file_write(&priv->file, data, len);
+      if (ret < 0)
         {
-          ssize_t ret = file_write(&priv->file, data, len);
-          if (ret < 0)
-            {
-              break;
-            }
-          data += ret;
-          len  -= ret;
+          return ret;
         }
+      data += ret;
+      len  -= ret;
     }
+
+  return 0;
 }
 
 /****************************************************************************
@@ -160,7 +148,7 @@ int usrsock_main(int argc, char *argv[])
       return -EINVAL;
     }
 
-  priv.cpu_name = argv[1];
+  priv.cpuname = argv[1];
   priv.pid = getpid();
 
   sem_init(&priv.sem, 0, 0);
@@ -168,13 +156,10 @@ int usrsock_main(int argc, char *argv[])
 
   sigrelse(SIGUSR1);
 
-  ret = rpmsg_register_callback(USRSOCK_RPMSG_CHANNEL_NAME,
-                                &priv,
+  ret = rpmsg_register_callback(&priv,
                                 usrsock_rpmsg_device_created,
-                                NULL,
-                                usrsock_rpmsg_channel_created,
-                                usrsock_rpmsg_channel_destroyed,
-                                usrsock_rpmsg_channel_received);
+                                usrsock_rpmsg_device_destroy,
+                                NULL);
   if (ret < 0)
     {
       goto destroy_sem;
@@ -195,7 +180,7 @@ int usrsock_main(int argc, char *argv[])
 
       if (ret < 0)
         {
-          goto unregister_rpmsg;
+          goto unregister_callback;
         }
 
       /* Open the kernel channel */
@@ -203,7 +188,7 @@ int usrsock_main(int argc, char *argv[])
       if (ret < 0)
         {
           ret = -errno;
-          goto delete_channel;
+          goto destroy_ept;
         }
 
       /* Forward the packet from kernel to remote */
@@ -224,7 +209,7 @@ int usrsock_main(int argc, char *argv[])
             }
 
           /* Read the packet from kernel */
-          buf = rpmsg_get_tx_payload_buffer(priv.channel, &len, true);
+          buf = rpmsg_get_tx_payload_buffer(&priv.ept, &len, true);
           if (!buf)
             {
               ret = -ENOMEM;
@@ -238,7 +223,7 @@ int usrsock_main(int argc, char *argv[])
             }
 
           /* Send the packet to remote */
-          ret = rpmsg_send_nocopy(priv.channel, buf, ret);
+          ret = rpmsg_send_nocopy(&priv.ept, buf, ret);
           if (ret < 0)
             {
               break;
@@ -247,18 +232,23 @@ int usrsock_main(int argc, char *argv[])
 
       /* Reclaim the resource */
       file_close(&priv.file);
-      if (priv.channel)
+
+      if (is_rpmsg_ept_ready(&priv.ept))
         {
-          goto delete_channel;
+          goto destroy_ept;
         }
 
       /* The remote side crash, loop to wait it restore */
     }
 
-delete_channel:
-  rpmsg_delete_channel(priv.channel);
-unregister_rpmsg:
-  rpmsg_unregister_callback(USRSOCK_RPMSG_CHANNEL_NAME);
+destroy_ept:
+  rpmsg_destroy_ept(&priv.ept);
+
+unregister_callback:
+  rpmsg_unregister_callback(&priv,
+                            usrsock_rpmsg_device_created,
+                            usrsock_rpmsg_device_destroy,
+                            NULL);
 destroy_sem:
   sem_destroy(&priv.sem);
   return ret;
