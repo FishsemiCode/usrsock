@@ -47,6 +47,7 @@
 #include <signal.h>
 
 #include <nuttx/fs/fs.h>
+#include <nuttx/net/dns.h>
 #include <nuttx/rptun/openamp.h>
 
 #include "usrsock_rpmsg.h"
@@ -68,12 +69,17 @@ struct usrsock_rpmsg_s
  * Private Function Prototypes
  ****************************************************************************/
 
+static int usrsock_rpmsg_dns_handler(struct rpmsg_endpoint *ept, void *data,
+                                     size_t len, uint32_t src, void *priv);
+static int usrsock_rpmsg_default_handler(struct rpmsg_endpoint *ept, void *data,
+                                         size_t len, uint32_t src, void *priv_);
+
 static void usrsock_rpmsg_device_created(struct rpmsg_device *rdev,
                                          void *priv_);
 static void usrsock_rpmsg_device_destroy(struct rpmsg_device *rdev,
                                          void *priv_);
 static int usrsock_rpmsg_ept_cb(struct rpmsg_endpoint *ept, void *data,
-                                size_t len, uint32_t src, void *priv_);
+                                size_t len, uint32_t src, void *priv);
 
 /****************************************************************************
  * Private Functions
@@ -111,8 +117,21 @@ static void usrsock_rpmsg_device_destroy(struct rpmsg_device *rdev,
     }
 }
 
-static int usrsock_rpmsg_ept_cb(struct rpmsg_endpoint *ept, void *data,
-                                size_t len, uint32_t src, void *priv_)
+static int usrsock_rpmsg_dns_handler(struct rpmsg_endpoint *ept, void *data,
+                                     size_t len, uint32_t src, void *priv)
+{
+  int ret = OK;
+#ifdef CONFIG_NETDB_DNSCLIENT
+  struct usrsock_rpmsg_dns_event_s *dns = data;
+
+  ret = dns_add_nameserver((struct sockaddr *)(dns + 1), dns->addrlen);
+#endif
+
+  return ret;
+}
+
+static int usrsock_rpmsg_default_handler(struct rpmsg_endpoint *ept, void *data,
+                                         size_t len, uint32_t src, void *priv_)
 {
   struct usrsock_rpmsg_s *priv = priv_;
 
@@ -128,6 +147,25 @@ static int usrsock_rpmsg_ept_cb(struct rpmsg_endpoint *ept, void *data,
     }
 
   return 0;
+}
+
+static int usrsock_rpmsg_ept_cb(struct rpmsg_endpoint *ept, void *data,
+                                size_t len, uint32_t src, void *priv)
+{
+  struct usrsock_message_common_s *common = data;
+  int ret;
+
+  switch (common->msgid)
+    {
+      case USRSOCK_RPMSG_DNS_EVENT:
+        ret = usrsock_rpmsg_dns_handler(ept, data, len, src, priv);
+        break;
+      default:
+        ret = usrsock_rpmsg_default_handler(ept, data, len, src, priv);
+        break;
+    }
+
+  return ret;
 }
 
 /****************************************************************************

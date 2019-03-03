@@ -47,6 +47,7 @@
 #include <signal.h>
 #include <string.h>
 
+#include <nuttx/net/dns.h>
 #include <nuttx/net/net.h>
 #include <nuttx/rptun/openamp.h>
 
@@ -619,6 +620,27 @@ static int usrsock_rpmsg_ioctl_handler(struct rpmsg_endpoint *ept,
            ack, req->head.xid, ret, req->arglen, req->arglen);
 }
 
+#ifdef CONFIG_NETDB_DNSCLIENT
+static int usrsock_rpmsg_send_dns_event(void *arg,
+                                        struct sockaddr *addr,
+                                        socklen_t addrlen)
+{
+  struct rpmsg_endpoint *ept = arg;
+  struct usrsock_rpmsg_dns_event_s *dns;
+  uint32_t len;
+
+  dns = rpmsg_get_tx_payload_buffer(ept, &len, true);
+
+  dns->head.msgid = USRSOCK_RPMSG_DNS_EVENT;
+  dns->head.flags = USRSOCK_MESSAGE_FLAG_EVENT;
+
+  dns->addrlen = addrlen;
+  memcpy(dns + 1, addr, addrlen);
+
+  return rpmsg_send(ept, dns, sizeof(*dns) + addrlen);
+}
+#endif
+
 static void usrsock_rpmsg_ns_bind(struct rpmsg_device *rdev, void *priv_,
                                   const char *name, uint32_t dest)
 {
@@ -645,7 +667,12 @@ static void usrsock_rpmsg_ns_bind(struct rpmsg_device *rdev, void *priv_,
   if (ret)
     {
       free(ept);
+      return;
     }
+
+#ifdef CONFIG_NETDB_DNSCLIENT
+  dns_register_notify(usrsock_rpmsg_send_dns_event, ept);
+#endif
 }
 
 static void usrsock_rpmsg_ns_unbind(struct rpmsg_endpoint *ept)
@@ -653,6 +680,10 @@ static void usrsock_rpmsg_ns_unbind(struct rpmsg_endpoint *ept)
   struct usrsock_rpmsg_s *priv = ept->priv;
   struct socket *socks[CONFIG_NSOCKET_DESCRIPTORS];
   int i, count = 0;
+
+#ifdef CONFIG_NETDB_DNSCLIENT
+  dns_unregister_notify(usrsock_rpmsg_send_dns_event, ept);
+#endif
 
   /* Collect all socks belong to the dead client */
   for (i = 0; i < CONFIG_NSOCKET_DESCRIPTORS; i++)

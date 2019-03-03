@@ -48,4 +48,19 @@
 
 #define USRSOCK_RPMSG_EPT_NAME      "rpmsg-usrsock"
 
+#define USRSOCK_RPMSG_DNS_EVENT      127
+
+/****************************************************************************
+ * Public Types
+ ****************************************************************************/
+
+/* DNS event message */
+
+begin_packed_struct struct usrsock_rpmsg_dns_event_s
+{
+  struct usrsock_message_common_s head;
+
+  uint16_t addrlen;
+} end_packed_struct;
+
 #endif /* __USRSOCK_RPMSG_H */
