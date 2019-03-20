@@ -288,7 +288,7 @@ static int usrsock_rpmsg_connect_handler(struct rpmsg_endpoint *ept,
                                          uint32_t src, void *priv_)
 {
   struct usrsock_request_connect_s *req = data;
-  struct usrsock_rpmsg_s *priv = priv;
+  struct usrsock_rpmsg_s *priv = priv_;
   bool inprogress = false;
   int retr, ret = -EBADF;
 
