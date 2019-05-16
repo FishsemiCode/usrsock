@@ -637,7 +637,7 @@ static int usrsock_rpmsg_send_dns_event(void *arg,
   dns->addrlen = addrlen;
   memcpy(dns + 1, addr, addrlen);
 
-  return rpmsg_send(ept, dns, sizeof(*dns) + addrlen);
+  return rpmsg_send_nocopy(ept, dns, sizeof(*dns) + addrlen);
 }
 #endif
 
