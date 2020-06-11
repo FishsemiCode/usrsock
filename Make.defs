@@ -34,5 +34,5 @@
 ############################################################################
 
 ifeq ($(CONFIG_RPMSG_USRSOCK),y)
-CONFIGURED_APPS += external/services/usrsock
+CONFIGURED_APPS += $(APPDIR)/external/services/usrsock
 endif

@@ -45,6 +45,6 @@ else
 MAINSRC := usrsock_rpmsg_server.c
 endif
 
-PROGNAME = usrsock$(EXEEXT)
+PROGNAME = usrsock
 
 include $(APPDIR)/Application.mk
