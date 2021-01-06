@@ -714,11 +714,18 @@ static void usrsock_rpmsg_ns_unbind(struct rpmsg_endpoint *ept)
 static int usrsock_rpmsg_ept_cb(struct rpmsg_endpoint *ept, void *data,
                                 size_t len, uint32_t src, void *priv)
 {
+  int ret = 0;
   struct usrsock_request_common_s *common = data;
 
   if (common->reqid >= 0 && common->reqid < USRSOCK_REQUEST__MAX)
     {
-      return g_usrsock_rpmsg_handler[common->reqid](ept, data, len, src, priv);
+      ret = g_usrsock_rpmsg_handler[common->reqid](ept, data, len, src, priv);
+      if (ret < 0)
+        {
+          syslog(LOG_INFO, "usrsock rpmsg ept cb ret = %d, reqid = %d\n",
+                 ret, common->reqid);
+        }
+      return ret;
     }
 
   return -EINVAL;
