@@ -227,9 +227,6 @@ static int usrsock_rpmsg_socket_handler(struct rpmsg_endpoint *ept,
           ret = psock_socket(req->domain, req->type, req->protocol, &priv->socks[i]);
           if (ret >= 0)
             {
-              psock_fcntl(&priv->socks[i], F_SETFL,
-                psock_fcntl(&priv->socks[i], F_GETFL) | O_NONBLOCK);
-
               priv->epts[i] = ept;
               ret = i; /* Return index as the usockid */
             }
@@ -558,9 +555,6 @@ static int usrsock_rpmsg_accept_handler(struct rpmsg_endpoint *ept,
                       outaddrlen ? &outaddrlen : NULL, &priv->socks[i]);
               if (ret >= 0)
                 {
-                  psock_fcntl(&priv->socks[i], F_SETFL,
-                    psock_fcntl(&priv->socks[i], F_GETFL) | O_NONBLOCK);
-
                   priv->epts[i] = ept;
 
                   /* Append index as usockid to the payload */
